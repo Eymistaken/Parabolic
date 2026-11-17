@@ -2,54 +2,13 @@ import SwiftUI
 
 // MARK: - Ambient backdrop
 
-/// A slowly drifting mesh gradient behind every screen. Liquid Glass is a
-/// material that refracts what is behind it; on a flat background it would have
-/// nothing to show.
+/// The plain system background behind every screen: light gray in light
+/// mode, black in dark mode. The glass cards sit on top of it.
 struct AmbientBackground: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: reduceMotion)) { context in
-            let time = Float(context.date.timeIntervalSinceReferenceDate)
-            MeshGradient(
-                width: 3,
-                height: 3,
-                points: points(at: reduceMotion ? 0 : time),
-                colors: colorScheme == .dark ? Self.darkColors : Self.lightColors,
-                smoothsColors: true
-            )
-        }
-        .ignoresSafeArea()
+        Color(uiColor: .systemGroupedBackground)
+            .ignoresSafeArea()
     }
-
-    private func points(at time: Float) -> [SIMD2<Float>] {
-        func wobble(_ phase: Float, _ amount: Float) -> Float {
-            sin(time * 0.18 + phase) * amount
-        }
-        let topMiddle = SIMD2<Float>(0.5 + wobble(0, 0.08), 0)
-        let left = SIMD2<Float>(0, 0.5 + wobble(1.3, 0.1))
-        let center = SIMD2<Float>(0.5 + wobble(2.1, 0.12), 0.5 + wobble(0.7, 0.12))
-        let right = SIMD2<Float>(1, 0.5 + wobble(2.9, 0.1))
-        let bottomMiddle = SIMD2<Float>(0.5 + wobble(3.7, 0.08), 1)
-        return [
-            SIMD2<Float>(0, 0), topMiddle, SIMD2<Float>(1, 0),
-            left, center, right,
-            SIMD2<Float>(0, 1), bottomMiddle, SIMD2<Float>(1, 1),
-        ]
-    }
-
-    private static let lightColors: [Color] = [
-        Color(red: 0.86, green: 0.87, blue: 1.00), Color(red: 0.96, green: 0.90, blue: 1.00), Color(red: 1.00, green: 0.89, blue: 0.93),
-        Color(red: 0.82, green: 0.93, blue: 1.00), Color(red: 0.95, green: 0.95, blue: 1.00), Color(red: 1.00, green: 0.93, blue: 0.88),
-        Color(red: 0.84, green: 0.97, blue: 0.95), Color(red: 0.88, green: 0.90, blue: 1.00), Color(red: 0.93, green: 0.86, blue: 1.00),
-    ]
-
-    private static let darkColors: [Color] = [
-        Color(red: 0.10, green: 0.10, blue: 0.28), Color(red: 0.20, green: 0.09, blue: 0.30), Color(red: 0.30, green: 0.08, blue: 0.20),
-        Color(red: 0.05, green: 0.16, blue: 0.30), Color(red: 0.08, green: 0.08, blue: 0.16), Color(red: 0.28, green: 0.12, blue: 0.10),
-        Color(red: 0.03, green: 0.20, blue: 0.22), Color(red: 0.12, green: 0.10, blue: 0.32), Color(red: 0.22, green: 0.08, blue: 0.32),
-    ]
 }
 
 // MARK: - Cards and sections
@@ -105,7 +64,7 @@ struct GlassRow<Trailing: View>: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 32, height: 32)
-                .background(tint.gradient, in: .rect(cornerRadius: 9))
+                .background(tint, in: .rect(cornerRadius: 9))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 if let detail {
@@ -240,7 +199,7 @@ struct GlassProgressBar: View {
                 Capsule().fill(Color.primary.opacity(0.08))
                 if let value {
                     Capsule()
-                        .fill(LinearGradient(colors: [.accentColor, .accentColor.opacity(0.7)], startPoint: .leading, endPoint: .trailing))
+                        .fill(Color.accentColor)
                         .frame(width: max(8, width * min(max(value, 0), 1)))
                         .animation(.smooth(duration: 0.3), value: value)
                 } else {
@@ -295,14 +254,10 @@ struct MediaThumbnail: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color.accentColor.opacity(0.35), Color.purple.opacity(0.25)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            Color(uiColor: .tertiarySystemFill)
             Image(systemName: kind.symbol)
                 .font(.title2)
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(.secondary)
             if let urlString, let url = URL(string: urlString) {
                 AsyncImage(url: url, transaction: Transaction(animation: .smooth)) { phase in
                     if let image = phase.image {

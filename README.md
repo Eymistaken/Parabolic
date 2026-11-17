@@ -63,8 +63,8 @@ cd android
 
 SwiftUI ile, Apple'ın iOS 26 tasarım dili **Liquid Glass** üzerine sıfırdan
 yazıldı: `glassEffect`, `GlassEffectContainer` içinde birbirine akan seçim
-çipleri, `tabViewBottomAccessory`'de süren indirme, kaydırınca küçülen sekme
-çubuğu ve camın kırılacağı bir şey olsun diye ağır ağır akan bir `MeshGradient`.
+çipleri, `tabViewBottomAccessory`'de süren indirme ve kaydırınca küçülen sekme
+çubuğu. Arka plan sistemin düz rengidir: açık temada gri, koyu temada siyah.
 
 iOS, uygulamaların alt süreç başlatmasına izin vermez; yani yt-dlp, ffmpeg ya
 da Deno çalıştırılamaz. Uygulama bunu Apple'ın kendi çatılarıyla çözer:
