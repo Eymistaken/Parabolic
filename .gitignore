@@ -1,0 +1,17 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Gizli imzalama bilgileri
+keystore.properties
+*.jks
+*.keystore
+
+# Kotlin derleyici çıktısı
+.kotlin/

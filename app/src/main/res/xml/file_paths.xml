@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Only used below API 29, where files land in the public media folders. -->
+    <external-path name="public" path="." />
+    <external-files-path name="private" path="." />
+</paths>

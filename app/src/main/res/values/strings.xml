@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Parabolic</string>
+    <string name="notification_channel_downloads">İndirmeler</string>
+    <string name="notification_channel_done">Tamamlananlar</string>
+</resources>
