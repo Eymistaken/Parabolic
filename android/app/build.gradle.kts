@@ -19,9 +19,9 @@ android {
         applicationId = "dev.eymistaken.parabolic"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
-
+        // CI passes these from the release tag (-PversionName=1.2.0 -PversionCode=42).
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
+        versionName = (project.findProperty("versionName") as String?) ?: "1.0"
     }
 
     // One APK per ABI: the python/ffmpeg payloads are ~55 MB per architecture,

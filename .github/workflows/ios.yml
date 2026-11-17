@@ -1,0 +1,121 @@
+name: iOS
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: "Marketing version, e.g. 1.2.0"
+        type: string
+        required: true
+      build-number:
+        description: "Monotonic build number"
+        type: string
+        required: true
+
+
+env:
+  XCODE_APP: /Applications/Xcode_26.6.app
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          if [ -d "$XCODE_APP" ]; then sudo xcode-select -s "$XCODE_APP"; fi
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      # Matches the embedded interpreter, so bootstrap can pre-compile bytecode.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "name=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "build=${{ inputs.build-number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=0.0.0" >> "$GITHUB_OUTPUT"
+            echo "build=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch Python and yt-dlp
+        run: ./scripts/bootstrap.sh
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build
+        run: |
+          mkdir -p build
+          set +e
+          xcodebuild build \
+            -project Parabolic.xcodeproj \
+            -scheme Parabolic \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath build/DerivedData \
+            MARKETING_VERSION="${{ steps.version.outputs.name }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.version.outputs.build }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            > build/xcodebuild.log 2>&1
+          status=$?
+          set -e
+          # Surface compiler errors as annotations on the run.
+          sed -nE 's#^(/[^:]+):([0-9]+):([0-9]+): error: (.*)$#::error file=\1,line=\2,col=\3::\4#p' build/xcodebuild.log | sort -u | head -100
+          grep -E "error:|\*\* BUILD" build/xcodebuild.log | sort -u | head -100 || true
+          tail -n 40 build/xcodebuild.log
+          exit $status
+
+      - name: Package IPA
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then VERSION="dev.${{ github.run_number }}"; fi
+          rm -rf build/ipa && mkdir -p build/ipa/Payload "$GITHUB_WORKSPACE/dist"
+          cp -R build/DerivedData/Build/Products/Release-iphoneos/Parabolic.app build/ipa/Payload/
+          (cd build/ipa && zip -qry -9 "$GITHUB_WORKSPACE/dist/Parabolic-${VERSION}-ios.ipa" Payload)
+          cp Vendor/YTDLP-VERSION "$GITHUB_WORKSPACE/dist/ytdlp-version.txt"
+          ls -la "$GITHUB_WORKSPACE/dist"
+          du -sh build/ipa/Payload/Parabolic.app
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-log
+          path: ios/build/xcodebuild.log
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: |
+            dist/*.ipa
+            dist/ytdlp-version.txt
+          if-no-files-found: error

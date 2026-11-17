@@ -1,0 +1,83 @@
+# XcodeGen project definition. Generate the Xcode project with:
+#   ./scripts/bootstrap.sh && xcodegen generate
+name: Parabolic
+
+options:
+  bundleIdPrefix: dev.eymistaken
+  deploymentTarget:
+    iOS: "26.0"
+  developmentLanguage: tr
+  createIntermediateGroups: true
+
+settings:
+  base:
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  Parabolic:
+    type: application
+    platform: iOS
+    sources:
+      - path: Parabolic
+    dependencies:
+      # CPython for iOS (BeeWare Python-Apple-support), fetched by scripts/bootstrap.sh.
+      - framework: Vendor/Python.xcframework
+        embed: true
+        codeSign: true
+    scheme: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.eymistaken.parabolic
+        PRODUCT_NAME: Parabolic
+        INFOPLIST_FILE: Support/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        SWIFT_OBJC_BRIDGING_HEADER: Parabolic/Engine/Parabolic-Bridging-Header.h
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
+        # Required by Python.xcframework (see docs.python.org/3/using/ios.html).
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER: NO
+        HEADER_SEARCH_PATHS: "\"$(BUILT_PRODUCTS_DIR)/Python.framework/Headers\""
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+        SWIFT_EMIT_LOC_STRINGS: NO
+    postBuildScripts:
+      - name: Install Python, yt-dlp and the bridge
+        basedOnDependencyAnalysis: false
+        shell: /bin/bash
+        script: |
+          set -e
+          XCFRAMEWORK="Vendor/Python.xcframework"
+          if [ ! -d "$PROJECT_DIR/$XCFRAMEWORK" ] || [ ! -d "$PROJECT_DIR/Vendor/app_packages/yt_dlp" ]; then
+            echo "error: Python or yt-dlp is missing. Run ios/scripts/bootstrap.sh first."
+            exit 1
+          fi
+
+          # Unsigned CI builds have no signing identity: ad-hoc sign the Python
+          # extension frameworks so sideloading tools can re-sign the whole app.
+          if [ -z "$EXPANDED_CODE_SIGN_IDENTITY" ]; then
+            export EXPANDED_CODE_SIGN_IDENTITY="-"
+          fi
+          source "$PROJECT_DIR/$XCFRAMEWORK/build/utils.sh"
+
+          # The bridge module and the vendored pure-Python packages.
+          mkdir -p "$CODESIGNING_FOLDER_PATH/app" "$CODESIGNING_FOLDER_PATH/app_packages"
+          rsync -a --delete "$PROJECT_DIR/python/" "$CODESIGNING_FOLDER_PATH/app/"
+          rsync -a --delete "$PROJECT_DIR/Vendor/app_packages/" "$CODESIGNING_FOLDER_PATH/app_packages/"
+
+          # The standard library, minus what never runs inside an app.
+          install_stdlib "$XCFRAMEWORK"
+          PYTHON_VER=$(ls -1 "$CODESIGNING_FOLDER_PATH/python/lib" | grep -E '^python3\.[0-9]+$')
+          STDLIB="$CODESIGNING_FOLDER_PATH/python/lib/$PYTHON_VER"
+          rm -rf "$STDLIB/test" "$STDLIB/idlelib" "$STDLIB/tkinter" "$STDLIB/turtledemo" "$STDLIB/ensurepip"
+          find "$STDLIB/lib-dynload" \( -name '_test*' -o -name '_ctypes_test*' -o -name 'xx*' \) -delete
+
+          # iOS only loads binary modules from frameworks: convert every .so.
+          process_dylibs "$XCFRAMEWORK" "python/lib/$PYTHON_VER/lib-dynload"

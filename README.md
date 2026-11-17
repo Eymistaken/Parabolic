@@ -1,45 +1,110 @@
-# Parabolic Android
+# Parabolic
 
 [NickvisionApps/Parabolic](https://github.com/NickvisionApps/Parabolic)'in iş akışını
-Android'e taşıyan bağımsız bir yt-dlp istemcisi. Jetpack Compose ve Material 3
-Expressive ile yazıldı; renkleri Material You üzerinden duvar kağıdından alır.
+mobil cihazlara taşıyan bağımsız bir yt-dlp istemcisi. Bu depo iki uygulamayı
+barındıran bir monorepo:
 
-## Neden
+| Dizin | Platform | Teknoloji |
+|---|---|---|
+| [`android/`](android) | Android 7.0+ | Kotlin, Jetpack Compose, Material 3 Expressive |
+| [`ios/`](ios) | iOS 26+ | Swift, SwiftUI, Liquid Glass |
 
-Android'deki mevcut yt-dlp istemcileri bozulduğunda bunun iki nedeni oluyor:
-içlerindeki yt-dlp eskimiş oluyor ve YouTube'un JavaScript challenge'larını
-çözecek bir JS çalıştırıcısı bulunmuyor. Bu uygulama her ikisini de ele alıyor:
+## Sürümler
 
-- `youtubedl-android 0.18.1` paketindeki **QuickJS** (`libqjs.so`) yt-dlp'ye
-  `--js-runtimes quickjs:` olarak geçiliyor — masaüstü Parabolic'in Deno ile
-  yaptığı işin Android karşılığı.
-- yt-dlp, GitHub release'lerinden **çalışma zamanında güncelleniyor**. Varsayılan
-  kanal `nightly` ve günde bir otomatik kontrol ediliyor.
-
-## Nasıl çalışır
-
-| Katman | Ne yapıyor |
-|---|---|
-| `core/YtdlpEngine` | yt-dlp argümanlarını kurar, `--dump-single-json` çıktısını çözer, indirmeyi yürütür |
-| `core/DownloadRepository` | Kuyruk, eşzamanlılık, ilerleme durumu ve geçmiş |
-| `core/MediaStoreSaver` | Bitmiş dosyayı `Movies/Parabolic` veya `Music/Parabolic` altına taşır |
-| `service/DownloadService` | Ön plan servisi + wake lock, indirme sürerken süreç ölmesin diye |
-| `ui/` | Compose arayüz: `MaterialExpressiveTheme`, `MotionScheme.expressive()` |
-
-İndirme önce uygulamanın özel dizinine yapılır, sonra MediaStore'a kopyalanır.
-Bu sayede Android 10 ve üstünde hiçbir depolama izni gerekmiyor.
-
-## Derleme
+Her `v*` etiketi iki uygulamayı da GitHub Actions'ta derler ve APK'lar ile IPA'yı
+eklenmiş bir GitHub Release yayınlar:
 
 ```bash
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+`v1.3.0-beta.1` gibi tire içeren etiketler ön sürüm olarak yayınlanır. Sürüm
+Actions sekmesindeki **Release** iş akışından elle de başlatılabilir.
+
+| İş akışı | Ne zaman çalışır | Çıktı |
+|---|---|---|
+| `android.yml` | `android/` değişince, PR'larda | ABI başına imzalı APK |
+| `ios.yml` | `ios/` değişince, PR'larda | İmzasız IPA |
+| `release.yml` | `v*` etiketi | İkisini derler, Release yayınlar |
+
+### Android imzalama anahtarı
+
+Release APK'ları her sürümde aynı anahtarla imzalanmalı, yoksa kullanıcılar
+güncelleme yapamaz. Anahtar depo gizlilerinden okunur:
+
+| Gizli | İçerik |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 android/parabolic-release.jks` çıktısı |
+| `ANDROID_KEYSTORE_PASSWORD` | Anahtar deposu parolası |
+| `ANDROID_KEY_ALIAS` | Anahtar takma adı |
+| `ANDROID_KEY_PASSWORD` | Anahtar parolası |
+
+Bu gizliler yoksa `release.yml` bilerek başarısız olur; PR ve `main`
+derlemeleri ise geçici bir hata ayıklama anahtarıyla devam eder.
+
+## Android
+
+Jetpack Compose ve Material 3 Expressive ile yazıldı; renkleri Material You
+üzerinden duvar kağıdından alır.
+
+- `youtubedl-android` paketindeki **QuickJS** yt-dlp'ye `--js-runtimes quickjs:`
+  olarak geçiliyor; YouTube'un JavaScript challenge'ları böyle çözülüyor.
+- yt-dlp, GitHub release'lerinden **çalışma zamanında güncelleniyor**.
+- İndirme uygulamanın özel dizinine yapılır, sonra MediaStore'a kopyalanır.
+  Android 10 ve üstünde hiçbir depolama izni gerekmez.
+
+```bash
+cd android
 ./gradlew :app:assembleRelease
 ```
 
-İmzalama bilgileri `keystore.properties` içinde; `parabolic-release.jks`
-bu depo için üretilmiş kişisel bir anahtardır.
+## iOS
+
+SwiftUI ile, Apple'ın iOS 26 tasarım dili **Liquid Glass** üzerine sıfırdan
+yazıldı: `glassEffect`, `GlassEffectContainer` içinde birbirine akan seçim
+çipleri, `tabViewBottomAccessory`'de süren indirme, kaydırınca küçülen sekme
+çubuğu ve camın kırılacağı bir şey olsun diye ağır ağır akan bir `MeshGradient`.
+
+iOS, uygulamaların alt süreç başlatmasına izin vermez; yani yt-dlp, ffmpeg ya
+da Deno çalıştırılamaz. Uygulama bunu Apple'ın kendi çatılarıyla çözer:
+
+| Katman | Ne yapıyor |
+|---|---|
+| `Engine/PythonShim.c` | Uygulamaya gömülü CPython'u (BeeWare `Python.xcframework`) başlatır, GIL'i yönetir |
+| `python/parabolic_bridge.py` | yt-dlp'yi süreç içinde çalıştırır; her formatı ayrı dosya olarak indirir |
+| `python/parabolic_jsc.py` | YouTube challenge'larını **JavaScriptCore** ile çözen yt-dlp eklentisi |
+| `Media/MediaAssembler.swift` | Video ve sesi **AVFoundation** ile yeniden kodlamadan birleştirir, kapak ve etiket yazar, SponsorBlock bölümlerini keser |
+| `Downloads/DownloadManager.swift` | Kuyruk, eşzamanlılık, ilerleme, **SwiftData** kitaplığı |
+| `Downloads/BackgroundActivity.swift` | iOS 26 `BGContinuedProcessingTask` ile indirmeyi arka planda sürdürür |
+
+ffmpeg olmadığından format seçimi AVFoundation'ın birleştirebildikleriyle
+sınırlıdır: H.264 (her cihazda, YouTube'da 1080p'ye kadar) ya da AV1/HEVC
+(4K'ya kadar) video ve AAC ses. Ses M4A olarak ya da kaynak biçiminde kaydedilir.
+
+İndirilenler **Dosyalar › iPhone'umda › Parabolic** altında `Videolar` ve `Müzik`
+klasörlerinde durur; istenirse videolar Fotoğraflar'a da eklenir. Kestirmeler'deki
+**Parabolic ile indir** eylemi ve `parabolic://add?url=…` bağlantısı bir adresi
+doğrudan uygulamaya gönderir.
+
+### Yerelde derleme (macOS, Xcode 26)
+
+```bash
+brew install xcodegen
+cd ios
+./scripts/bootstrap.sh   # Python.xcframework, yt-dlp ve certifi'yi Vendor/ altına indirir
+xcodegen generate
+open Parabolic.xcodeproj
+```
+
+### Kurulum
+
+Release'teki IPA imzasızdır. AltStore, SideStore, Sideloadly ya da TrollStore
+ile kurulabilir; bu araçlar uygulamayı kendi hesabınla imzalar.
 
 ## Lisans
 
-GPL-3.0. Uygulama `youtubedl-android` (GPL-3.0) kütüphanesine bağlı olduğundan
-türev çalışma da GPL-3.0 altındadır. Parabolic'in masaüstü sürümü MIT'tir ve
-buradaki indirme mantığı oradaki yaklaşımdan türetilmiştir.
+GPL-3.0. Android uygulaması `youtubedl-android` (GPL-3.0) kütüphanesine bağlı
+olduğundan türev çalışma da GPL-3.0 altındadır. yt-dlp Unlicense, CPython PSF
+lisanslıdır. Parabolic'in masaüstü sürümü MIT'tir ve buradaki indirme mantığı
+oradaki yaklaşımdan türetilmiştir.

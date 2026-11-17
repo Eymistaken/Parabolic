@@ -1,0 +1,115 @@
+name: Release
+
+# Push a tag such as v1.2.0 (or v1.3.0-beta.1) to build both apps and publish
+# a GitHub Release with the APKs and the IPA attached.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, without the leading v (e.g. 1.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  meta:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      build-number: ${{ steps.meta.outputs.build }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - id: meta
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          VERSION="${VERSION#v}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$VERSION' is not a version like 1.2.0 or 1.3.0-beta.1"
+            exit 1
+          fi
+          CORE="${VERSION%%-*}"
+          IFS=. read -r MAJOR MINOR PATCH <<< "$CORE"
+          # Android versionCode and iOS CFBundleVersion: must only ever grow.
+          BUILD=$(( 10#$MAJOR * 1000000 + 10#$MINOR * 1000 + 10#${PATCH:-0} ))
+          PRERELEASE=false
+          case "$VERSION" in *-*) PRERELEASE=true ;; esac
+          {
+            echo "version=$VERSION"
+            echo "tag=v$VERSION"
+            echo "build=$BUILD"
+            echo "prerelease=$PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION (build $BUILD, prerelease: $PRERELEASE)"
+
+  android:
+    needs: meta
+    uses: ./.github/workflows/android.yml
+    with:
+      version: ${{ needs.meta.outputs.version }}
+      build-number: ${{ needs.meta.outputs.build-number }}
+      release: true
+    secrets: inherit
+
+  ios:
+    needs: meta
+    uses: ./.github/workflows/ios.yml
+    with:
+      version: ${{ needs.meta.outputs.version }}
+      build-number: ${{ needs.meta.outputs.build-number }}
+
+  publish:
+    name: Publish GitHub Release
+    needs: [meta, android, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Write release notes
+        run: |
+          VERSION="${{ needs.meta.outputs.version }}"
+          YTDLP=$(cat dist/ytdlp-version.txt 2>/dev/null || echo "unknown")
+          rm -f dist/ytdlp-version.txt
+          cat > notes.md <<EOF
+          ## Downloads
+
+          **Android** (Android 7.0 or later): install the APK for your device's architecture. Almost every current phone uses \`arm64-v8a\`.
+
+          - \`Parabolic-${VERSION}-android-arm64-v8a.apk\`: modern phones
+          - \`Parabolic-${VERSION}-android-armeabi-v7a.apk\`: older 32-bit phones
+          - \`Parabolic-${VERSION}-android-x86_64.apk\`: emulators and x86 devices
+
+          **iOS** (iOS 26 or later): \`Parabolic-${VERSION}-ios.ipa\` is unsigned. Install it with AltStore, SideStore, Sideloadly or TrollStore, which sign it for your device.
+
+          The iOS build bundles yt-dlp ${YTDLP} and updates it in the app from yt-dlp's GitHub releases.
+          EOF
+          ls -la dist
+          cat notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Parabolic ${{ needs.meta.outputs.version }}
+          body_path: notes.md
+          generate_release_notes: true
+          prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.apk
+            dist/*.ipa
