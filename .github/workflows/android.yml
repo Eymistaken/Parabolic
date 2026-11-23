@@ -79,9 +79,11 @@ jobs:
             echo "keyPassword=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
           } > keystore.properties
 
+      # :app is the Material 3 Expressive build; :legacy is the plain Material 3
+      # build for older Android versions (Android 11 and below).
       - name: Build release APKs
         run: |
-          ./gradlew :app:assembleRelease --stacktrace \
+          ./gradlew :app:assembleRelease :legacy:assembleRelease --stacktrace \
             -PversionName="${{ steps.version.outputs.name }}" \
             -PversionCode="${{ steps.version.outputs.code }}"
 
@@ -93,6 +95,10 @@ jobs:
           for apk in app/build/outputs/apk/release/*.apk; do
             abi=$(basename "$apk" .apk | sed -E 's/^app-//; s/-release(-unsigned)?$//')
             cp "$apk" "$GITHUB_WORKSPACE/dist/Parabolic-${VERSION}-android-${abi}.apk"
+          done
+          for apk in legacy/build/outputs/apk/release/*.apk; do
+            abi=$(basename "$apk" .apk | sed -E 's/^legacy-//; s/-release(-unsigned)?$//')
+            cp "$apk" "$GITHUB_WORKSPACE/dist/Parabolic-${VERSION}-android-legacy-${abi}.apk"
           done
           ls -la "$GITHUB_WORKSPACE/dist"
 

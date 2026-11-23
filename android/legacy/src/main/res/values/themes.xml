@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!--
+        Opaque window in the app's own surface color, and force dark switched off:
+        MIUI and some other skins otherwise repaint a light app on top of its own
+        colors, which is what left text and cards barely visible on Android 11.
+    -->
+    <style name="Theme.ParabolicLegacy" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/legacy_window</item>
+        <item name="android:colorBackground">@color/legacy_window</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:forceDarkAllowed" tools:targetApi="29">false</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="27">shortEdges</item>
+    </style>
+</resources>

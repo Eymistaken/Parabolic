@@ -22,3 +22,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Parabolic"
 include(":app")
+// Plain Material 3 build for older Android versions; shares ../app's engine.
+include(":legacy")

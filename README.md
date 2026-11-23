@@ -6,7 +6,8 @@ barındıran bir monorepo:
 
 | Dizin | Platform | Teknoloji |
 |---|---|---|
-| [`android/`](android) | Android 7.0+ | Kotlin, Jetpack Compose, Material 3 Expressive |
+| [`android/app/`](android/app) | Android 12+ | Kotlin, Jetpack Compose, Material 3 Expressive |
+| [`android/legacy/`](android/legacy) | Android 11 ve öncesi (7.0+) | Kotlin, Jetpack Compose, Material 3 |
 | [`ios/`](ios) | iOS 26+ | Swift, SwiftUI, Liquid Glass |
 
 ## Sürümler
@@ -24,7 +25,7 @@ Actions sekmesindeki **Release** iş akışından elle de başlatılabilir.
 
 | İş akışı | Ne zaman çalışır | Çıktı |
 |---|---|---|
-| `android.yml` | `android/` değişince, PR'larda | ABI başına imzalı APK |
+| `android.yml` | `android/` değişince, PR'larda | İki Android uygulaması için ABI başına imzalı APK |
 | `ios.yml` | `ios/` değişince, PR'larda | İmzasız IPA |
 | `release.yml` | `v*` etiketi | İkisini derler, Release yayınlar |
 
@@ -57,6 +58,29 @@ Jetpack Compose ve Material 3 Expressive ile yazıldı; renkleri Material You
 ```bash
 cd android
 ./gradlew :app:assembleRelease
+```
+
+### Android 11 ve öncesi (`legacy`)
+
+`android/legacy/` aynı uygulamanın eski Android sürümleri için ayrı bir APK'sıdır.
+Arayüzü Google Saat ya da Telefon gibi sıradan bir Android uygulamasının düz
+Material 3 görünümüdür: üst çubuk, alt gezinme çubuğu, "Yeni indirme" düğmesi,
+liste satırları ve klasik ayar pencereleri. Yazı tipi sistemin kendi yazı tipidir;
+renkler Android 12 ve üstünde duvar kağıdından, daha eskilerde uygulamanın sabit
+paletinden gelir. Paletteki her renk rolü tek tek tanımlıdır ve MIUI gibi
+arayüzlerin uygulamayı zorla koyulaştırması (force dark) kapalıdır.
+
+Yalnızca arayüz bu dizinde yazıldı. İndirme motoru, kuyruk, ayarlar ve ön plan
+servisi `android/app/` altındaki `core/` ve `service/` dosyalarından doğrudan
+derlenir; orada yapılan bir düzeltme iki APK'ya da girer. `android/app/` bu
+modül için hiç değiştirilmedi.
+
+Uygulama kimliği `dev.eymistaken.parabolic.legacy` olduğundan normal sürümle aynı
+telefona yan yana kurulabilir; ayarlar ve geçmiş ikisinde ayrı tutulur.
+
+```bash
+cd android
+./gradlew :legacy:assembleRelease
 ```
 
 ## iOS

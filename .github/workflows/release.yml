@@ -88,11 +88,17 @@ jobs:
           cat > notes.md <<EOF
           ## Downloads
 
-          **Android** (Android 7.0 or later): install the APK for your device's architecture. Almost every current phone uses \`arm64-v8a\`.
+          **Android 12 and later**: install the APK for your device's architecture. Almost every current phone uses \`arm64-v8a\`.
 
           - \`Parabolic-${VERSION}-android-arm64-v8a.apk\`: modern phones
           - \`Parabolic-${VERSION}-android-armeabi-v7a.apk\`: older 32-bit phones
           - \`Parabolic-${VERSION}-android-x86_64.apk\`: emulators and x86 devices
+
+          **Android 11 and older**: install the \`legacy\` APK instead. It has a plain Material 3 interface built for older versions and skins such as MIUI 12, where the regular build can show faint, hard-to-read text. It installs alongside the regular app and downloads the same way.
+
+          - \`Parabolic-${VERSION}-android-legacy-arm64-v8a.apk\`: modern phones
+          - \`Parabolic-${VERSION}-android-legacy-armeabi-v7a.apk\`: older 32-bit phones
+          - \`Parabolic-${VERSION}-android-legacy-x86_64.apk\`: emulators and x86 devices
 
           **iOS** (iOS 26 or later): \`Parabolic-${VERSION}-ios.ipa\` is unsigned. Install it with AltStore, SideStore, Sideloadly or TrollStore, which sign it for your device.
 
