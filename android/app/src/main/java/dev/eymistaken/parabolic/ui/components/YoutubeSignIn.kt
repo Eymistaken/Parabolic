@@ -4,9 +4,6 @@ import android.graphics.Bitmap
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -94,7 +91,7 @@ fun YoutubeSignInDialog(onDismiss: () -> Unit, onSignedIn: () -> Unit) {
                         },
                         onRelease = { it.destroy() },
                     )
-                    AnimatedVisibility(visible = loading < 1f, enter = fadeIn(), exit = fadeOut()) {
+                    if (loading < 1f) {
                         LinearWavyProgressIndicator(progress = { loading }, modifier = Modifier.fillMaxWidth())
                     }
                 }
