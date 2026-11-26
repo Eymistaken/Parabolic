@@ -22,6 +22,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Download
@@ -39,6 +42,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -59,6 +63,7 @@ import dev.eymistaken.parabolic.core.ThemeOption
 import dev.eymistaken.parabolic.core.UpdateChannelOption
 import dev.eymistaken.parabolic.core.VideoContainer
 import dev.eymistaken.parabolic.core.VideoQuality
+import dev.eymistaken.parabolic.core.YoutubeAccount
 import dev.eymistaken.parabolic.core.YtdlpEngine
 import dev.eymistaken.parabolic.core.YtdlpUpdateProgress
 import dev.eymistaken.parabolic.ui.components.DownloadProgressBar
@@ -75,6 +80,7 @@ import dev.eymistaken.parabolic.ui.components.SectionLabel
 import dev.eymistaken.parabolic.ui.components.SliderSetting
 import dev.eymistaken.parabolic.ui.components.SwitchRow
 import dev.eymistaken.parabolic.ui.components.ToggleFlow
+import dev.eymistaken.parabolic.ui.components.YoutubeSignInDialog
 import dev.eymistaken.parabolic.ui.components.rememberShownUpdate
 import dev.eymistaken.parabolic.ui.formatBytes
 import dev.eymistaken.parabolic.ui.theme.dynamicColorSupported
@@ -96,6 +102,8 @@ fun SettingsScreen(
     val updating = requested || update != null
     var ytdlpVersion by remember { mutableStateOf<String?>(null) }
     var showLanguages by remember { mutableStateOf(false) }
+    var showSignIn by remember { mutableStateOf(false) }
+    val youtubeSignedIn by YoutubeAccount.signedIn.collectAsStateWithLifecycle()
 
     // Read again whenever an update (manual or the daily one) finishes.
     LaunchedEffect(update == null) { ytdlpVersion = YtdlpEngine.ytdlpVersion(context) }
@@ -295,6 +303,47 @@ fun SettingsScreen(
             }
         }
 
+        item(key = "youtube") {
+            SectionCard("YouTube hesabı", icon = Icons.Filled.AccountCircle) {
+                Text(
+                    if (youtubeSignedIn) "Giriş yapıldı" else "Giriş yapılmadı",
+                    style = MaterialTheme.typography.titleMediumEmphasized,
+                )
+                Text(
+                    "YouTube bazen \"bot olmadığını doğrula\" diyerek indirmeyi durdurur. Giriş yaparsan " +
+                        "yt-dlp hesabının çerezlerini kullanır ve bu engel çoğunlukla kalkar; masaüstü " +
+                        "Parabolic'teki tarayıcı çerezleri seçeneğinin karşılığıdır. Çerezler yalnızca bu " +
+                        "cihazda saklanır. Çok yoğun indirmede hesap kısıtlanabileceği için ikinci bir hesap önerilir.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (youtubeSignedIn) {
+                    FilledTonalButton(
+                        onClick = {
+                            YoutubeAccount.signOut(context)
+                            onMessage("YouTube hesabından çıkıldı")
+                        },
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Çıkış yap")
+                    }
+                } else {
+                    Button(
+                        onClick = { showSignIn = true },
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("YouTube'a giriş yap")
+                    }
+                }
+            }
+        }
+
         item(key = "about") {
             SectionCard("Hakkında", icon = Icons.Filled.Info) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -317,6 +366,16 @@ fun SettingsScreen(
                 )
             }
         }
+    }
+
+    if (showSignIn) {
+        YoutubeSignInDialog(
+            onDismiss = { showSignIn = false },
+            onSignedIn = {
+                showSignIn = false
+                onMessage("YouTube hesabına giriş yapıldı")
+            },
+        )
     }
 
     if (showLanguages) {

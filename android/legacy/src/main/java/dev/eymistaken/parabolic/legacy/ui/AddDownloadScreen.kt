@@ -75,6 +75,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import dev.eymistaken.parabolic.core.AudioFormat
 import dev.eymistaken.parabolic.core.DownloadSpec
@@ -83,6 +84,7 @@ import dev.eymistaken.parabolic.core.MediaProbe
 import dev.eymistaken.parabolic.core.Prefs
 import dev.eymistaken.parabolic.core.VideoContainer
 import dev.eymistaken.parabolic.core.VideoQuality
+import dev.eymistaken.parabolic.core.YoutubeAccount
 import dev.eymistaken.parabolic.core.YtdlpEngine
 import dev.eymistaken.parabolic.core.lastMeaningfulLine
 import kotlinx.coroutines.CoroutineScope
@@ -99,6 +101,9 @@ class AddDownloadState(initialUrl: String, private val prefs: Prefs) {
     var probe by mutableStateOf<MediaProbe?>(null)
         private set
     var error by mutableStateOf<String?>(null)
+    /** The error is YouTube's "confirm you're not a bot"; signing in usually gets past it. */
+    var botCheck by mutableStateOf(false)
+        private set
         private set
 
     var kind by mutableStateOf(prefs.defaultKind)
@@ -154,6 +159,7 @@ class AddDownloadState(initialUrl: String, private val prefs: Prefs) {
         url = target
         probing = true
         error = null
+        botCheck = false
         job = scope.launch {
             runCatching { YtdlpEngine.probe(context, target) }
                 .onSuccess { result ->
@@ -184,7 +190,10 @@ class AddDownloadState(initialUrl: String, private val prefs: Prefs) {
                         }
                     }
                 }
-                .onFailure { error = it.message?.lastMeaningfulLine() ?: "Bilgi alınamadı" }
+                .onFailure {
+                    botCheck = it is YtdlpEngine.BotCheckFailure
+                    error = it.message?.lastMeaningfulLine() ?: "Bilgi alınamadı"
+                }
             probing = false
         }
     }
@@ -229,6 +238,8 @@ fun AddDownloadScreen(
     val focus = LocalFocusManager.current
     val state = remember { AddDownloadState(initialUrl, prefs) }
     var showLanguages by remember { mutableStateOf(false) }
+    var showSignIn by remember { mutableStateOf(false) }
+    val youtubeSignedIn by YoutubeAccount.signedIn.collectAsStateWithLifecycle()
     val pickFolder = rememberFolderPicker { state.targetFolder = it }
 
     val urlFocus = remember { FocusRequester() }
@@ -343,7 +354,15 @@ fun AddDownloadScreen(
                 ) {
                     Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
                     Spacer(Modifier.width(12.dp))
-                    Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+                    Column {
+                        Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+                        if (state.botCheck && !youtubeSignedIn) {
+                            Button(
+                                onClick = { showSignIn = true },
+                                modifier = Modifier.padding(top = 12.dp),
+                            ) { Text("YouTube'a giriş yap") }
+                        }
+                    }
                 }
             }
 
@@ -352,6 +371,17 @@ fun AddDownloadScreen(
                 Options(state, onPickFolder = pickFolder, onPickLanguages = { showLanguages = true })
             }
         }
+    }
+
+    if (showSignIn) {
+        YoutubeSignInDialog(
+            onDismiss = { showSignIn = false },
+            onSignedIn = {
+                showSignIn = false
+                // Try the same link again, now with the account's cookies.
+                state.startProbe(context, scope)
+            },
+        )
     }
 
     if (showLanguages) {

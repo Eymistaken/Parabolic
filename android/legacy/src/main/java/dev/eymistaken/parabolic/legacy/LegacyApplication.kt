@@ -7,6 +7,7 @@ import android.util.Log
 import dev.eymistaken.parabolic.core.DownloadRepository
 import dev.eymistaken.parabolic.core.Notifications
 import dev.eymistaken.parabolic.core.Prefs
+import dev.eymistaken.parabolic.core.YoutubeAccount
 import dev.eymistaken.parabolic.core.YtdlpEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +33,7 @@ class LegacyApplication : Application() {
         prefs = Prefs(this)
         downloads = DownloadRepository(this, prefs)
         Notifications.createChannels(this)
+        YoutubeAccount.load(this)
 
         scope.launch {
             runCatching { YtdlpEngine.ensureInit(this@LegacyApplication) }

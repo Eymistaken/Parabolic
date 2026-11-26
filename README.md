@@ -51,9 +51,27 @@ Jetpack Compose ve Material 3 Expressive ile yazıldı; renkleri Material You
 
 - `youtubedl-android` paketindeki **QuickJS** yt-dlp'ye `--js-runtimes quickjs:`
   olarak geçiliyor; YouTube'un JavaScript challenge'ları böyle çözülüyor.
-- yt-dlp, GitHub release'lerinden **çalışma zamanında güncelleniyor**.
+- yt-dlp, GitHub release'lerinden **çalışma zamanında güncelleniyor**; ayarlarda
+  güncellemenin ilerlemesi indirme kartlarındaki çubukla gösteriliyor.
 - İndirme uygulamanın özel dizinine yapılır, sonra MediaStore'a kopyalanır.
   Android 10 ve üstünde hiçbir depolama izni gerekmez.
+
+### "Sign in to confirm you're not a bot"
+
+YouTube bazı isteklere bu yanıtı verir; karar büyük ölçüde isteğin geldiği IP
+adresine bağlıdır. Masaüstü Parabolic'te varsayılan olarak özel bir önlem yoktur:
+yt-dlp'yi kalıcı önbelleğiyle çalıştırır ve gerektiğinde tarayıcı çerezlerini
+kullanmayı önerir. Android uygulaması aynı yolu izler:
+
+- yt-dlp kalıcı bir önbellekle (`--cache-dir`) çalışır; `youtubedl-android`
+  aksi belirtilmedikçe `--no-cache-dir` geçtiği için önceden her istek
+  YouTube'un oynatıcı kodunu yeniden indirip çözüyordu.
+- Bu hata gelince istek bir kez `--force-ipv4` ile yinelenir; IPv6 adresleri
+  daha sık işaretlenir. İşe yararsa o oturumda sonraki istekler de IPv4 kullanır.
+- **Ayarlar › YouTube hesabı** uygulama içinde Google'a giriş yaptırır ve
+  YouTube çerezlerini `--cookies` ile yt-dlp'ye verir. Bu, masaüstündeki
+  "tarayıcı çerezleri" seçeneğinin karşılığıdır; çerezler yalnızca cihazda,
+  uygulamanın özel dizininde durur.
 
 ```bash
 cd android

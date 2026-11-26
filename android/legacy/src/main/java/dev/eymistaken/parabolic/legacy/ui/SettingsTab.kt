@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Login
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -46,6 +48,7 @@ import dev.eymistaken.parabolic.core.ThemeOption
 import dev.eymistaken.parabolic.core.UpdateChannelOption
 import dev.eymistaken.parabolic.core.VideoContainer
 import dev.eymistaken.parabolic.core.VideoQuality
+import dev.eymistaken.parabolic.core.YoutubeAccount
 import dev.eymistaken.parabolic.core.YtdlpEngine
 import dev.eymistaken.parabolic.core.YtdlpUpdateProgress
 import kotlinx.coroutines.CancellationException
@@ -64,6 +67,8 @@ fun SettingsTab(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var picker by remember { mutableStateOf<Picker?>(null) }
+    var showSignIn by remember { mutableStateOf(false) }
+    val youtubeSignedIn by YoutubeAccount.signedIn.collectAsStateWithLifecycle()
     val update by YtdlpEngine.updateProgress.collectAsStateWithLifecycle()
     val shownUpdate = rememberShownUpdate(update)
     var requested by remember { mutableStateOf(false) }
@@ -185,6 +190,38 @@ fun SettingsTab(
             )
         }
 
+        item { SectionHeader("YouTube hesabı") }
+        item {
+            ListItem(
+                modifier = Modifier.clickable {
+                    if (youtubeSignedIn) {
+                        YoutubeAccount.signOut(context)
+                        onMessage("YouTube hesabından çıkıldı")
+                    } else {
+                        showSignIn = true
+                    }
+                },
+                headlineContent = { Text(if (youtubeSignedIn) "Çıkış yap" else "YouTube'a giriş yap") },
+                supportingContent = {
+                    Text(
+                        if (youtubeSignedIn) {
+                            "Giriş yapıldı. yt-dlp bu hesabın çerezlerini kullanıyor."
+                        } else {
+                            "YouTube \"bot olmadığını doğrula\" diyerek indirmeyi durdurursa giriş yapınca " +
+                                "genellikle düzelir. Çerezler yalnızca bu cihazda saklanır; yoğun kullanım için " +
+                                "ikinci bir hesap önerilir."
+                        },
+                    )
+                },
+                trailingContent = {
+                    Icon(
+                        if (youtubeSignedIn) Icons.AutoMirrored.Filled.Logout else Icons.AutoMirrored.Filled.Login,
+                        contentDescription = null,
+                    )
+                },
+            )
+        }
+
         item { SectionHeader("Hakkında") }
         item {
             ListItem(
@@ -201,6 +238,16 @@ fun SettingsTab(
                 },
             )
         }
+    }
+
+    if (showSignIn) {
+        YoutubeSignInDialog(
+            onDismiss = { showSignIn = false },
+            onSignedIn = {
+                showSignIn = false
+                onMessage("YouTube hesabına giriş yapıldı")
+            },
+        )
     }
 
     when (picker) {

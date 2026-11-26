@@ -68,21 +68,88 @@ object YtdlpEngine {
      */
     suspend fun probe(context: Context, url: String, wholePlaylist: Boolean = false): MediaProbe = withContext(Dispatchers.IO) {
         ensureInit(context)
-        val request = YoutubeDLRequest(url).apply {
-            addOption("--dump-single-json")
-            addOption(if (wholePlaylist) "--yes-playlist" else "--no-playlist")
-            addOption("--flat-playlist")
-            addOption("--no-warnings")
-            addOption("--ignore-config")
-            addOption("--socket-timeout", "20")
-            addOption("--retries", "3")
-        }
-        val response = YoutubeDL.getInstance().execute(request, null, null)
-        val raw = response.out.trim()
-        if (raw.isEmpty()) {
-            throw ProbeFailure(response.err.lastMeaningfulLine() ?: "yt-dlp bilgi döndürmedi")
+        val ipv4First = preferIpv4
+        val raw = try {
+            probeOnce(context, url, wholePlaylist, forceIpv4 = ipv4First)
+        } catch (failure: ProbeFailure) {
+            if (!isBotCheck(failure.message)) throw failure
+            if (ipv4First) throw BotCheckFailure(context)
+            // Bot checks are mostly about the address; an IPv6 one is flagged
+            // more often than the network's IPv4 one, so try that once.
+            try {
+                probeOnce(context, url, wholePlaylist, forceIpv4 = true).also { preferIpv4 = true }
+            } catch (again: ProbeFailure) {
+                if (isBotCheck(again.message)) throw BotCheckFailure(context)
+                throw again
+            }
         }
         parseProbe(url, raw)
+    }
+
+    private fun probeOnce(context: Context, url: String, wholePlaylist: Boolean, forceIpv4: Boolean): String {
+        val cookies = YoutubeAccount.cookieFileFor(context, "probe-${System.nanoTime()}")
+        try {
+            val request = YoutubeDLRequest(url).apply {
+                addOption("--dump-single-json")
+                addOption(if (wholePlaylist) "--yes-playlist" else "--no-playlist")
+                addOption("--flat-playlist")
+                addOption("--no-warnings")
+                addOption("--ignore-config")
+                addOption("--socket-timeout", "20")
+                addOption("--retries", "3")
+                addSessionOptions(context, cookies, forceIpv4)
+            }
+            val response = try {
+                YoutubeDL.getInstance().execute(request, null, null)
+            } catch (failure: YoutubeDLException) {
+                throw ProbeFailure(failure.message?.lastMeaningfulLine() ?: "yt-dlp hata verdi")
+            }
+            val raw = response.out.trim()
+            if (raw.isEmpty()) {
+                throw ProbeFailure(response.err.lastMeaningfulLine() ?: "yt-dlp bilgi döndürmedi")
+            }
+            return raw
+        } finally {
+            cookies?.delete()
+        }
+    }
+
+    // -- YouTube's bot check -------------------------------------------------
+
+    /**
+     * Set once a retry over IPv4 got past YouTube's bot check, so later runs
+     * in this process start there instead of tripping it again first.
+     */
+    @Volatile
+    private var preferIpv4 = false
+
+    /** "Sign in to confirm you're not a bot", whatever the apostrophe. */
+    fun isBotCheck(text: String?): Boolean = text?.contains("not a bot", ignoreCase = true) == true
+
+    /** YouTube still asked to confirm this is not a bot after every retry. */
+    class BotCheckFailure(context: Context) : Exception(YtdlpEngine.botCheckMessage(context))
+
+    private fun botCheckMessage(context: Context): String {
+        YoutubeAccount.load(context)
+        return if (YoutubeAccount.signedIn.value) {
+            "YouTube, giriş yapılmış olmasına rağmen bot olmadığını doğrulamanı istedi. " +
+                "Biraz bekleyip yeniden dene; sürerse Ayarlar'da YouTube hesabından çıkıp tekrar giriş yap."
+        } else {
+            "Bu bağlantı YouTube'un bot denetimine takıldı (\"Sign in to confirm you're not a bot\"). " +
+                "YouTube hesabınla giriş yaparsan genellikle düzelir; başka bir ağa (ör. Wi‑Fi) geçmek de işe yarayabilir."
+        }
+    }
+
+    /**
+     * What every yt-dlp run gets, so it behaves like yt-dlp on a desktop:
+     * a persistent cache (youtubedl-android passes --no-cache-dir unless one
+     * is set, which made every run fetch and solve YouTube's player code
+     * again), the signed-in cookies if there are any, and IPv4 when asked.
+     */
+    private fun YoutubeDLRequest.addSessionOptions(context: Context, cookies: File?, forceIpv4: Boolean) {
+        addOption("--cache-dir", File(context.cacheDir, "yt-dlp").absolutePath)
+        cookies?.let { addOption("--cookies", it.absolutePath) }
+        if (forceIpv4) addOption("--force-ipv4")
     }
 
     private fun parseProbe(url: String, raw: String): MediaProbe {
@@ -150,7 +217,10 @@ object YtdlpEngine {
         val warnings: List<String>,
         val errors: List<String> = emptyList(),
         val exitError: String? = null,
-    )
+    ) {
+        /** YouTube refused with "Sign in to confirm you're not a bot". */
+        val botCheck: Boolean get() = YtdlpEngine.isBotCheck(exitError) || errors.any { YtdlpEngine.isBotCheck(it) }
+    }
 
     /** yt-dlp's per-format parts (`name.f137.mp4`) that only exist before merging. */
     private val INTERMEDIATE_PART = Regex("""\.f[0-9]+(-[0-9]+)?\.[A-Za-z0-9]+$""")
@@ -192,25 +262,69 @@ object YtdlpEngine {
     ): DownloadResult = withContext(Dispatchers.IO) {
         ensureInit(context)
         outDir.mkdirs()
-        val request = buildRequest(spec, prefs, outDir)
-        try {
-            val response = YoutubeDL.getInstance().execute(request, taskId, false) { progress, eta, line ->
-                onProgress(progress, eta, line)
+        val ipv4First = preferIpv4
+        // Retrying is only safe while nothing has been downloaded: finished
+        // playlist items are moved out of outDir as they complete, and a
+        // second run would fetch them all again.
+        var started = false
+        val first = downloadOnce(context, taskId, spec, prefs, outDir, ipv4First) { progress, eta, line ->
+            if (line.startsWith("[download] Destination:")) started = true
+            onProgress(progress, eta, line)
+        }
+        if (!first.botCheck) return@withContext first
+        if (ipv4First || started || finishedMedia(outDir).isNotEmpty()) {
+            return@withContext first.withBotCheckMessage(context)
+        }
+
+        onProgress(-1f, -1, "[Parabolic] YouTube bot denetimi istedi; IPv4 ile yeniden deneniyor")
+        val second = downloadOnce(context, taskId, spec, prefs, outDir, forceIpv4 = true, onProgress)
+        when {
+            !second.botCheck -> {
+                if (second.exitError == null || finishedMedia(outDir).isNotEmpty()) preferIpv4 = true
+                second
             }
-            DownloadResult(linesWith("WARNING:", response.err))
-        } catch (failure: YoutubeDLException) {
-            // With --ignore-errors, a failed post-processing step (cover art, say)
-            // or a single unavailable playlist item still makes yt-dlp exit with 1.
-            // Whether that sinks the whole task is decided by the caller, based on
-            // whether any finished media file came out of it.
-            val stderr = failure.message.orEmpty()
-            DownloadResult(
-                warnings = linesWith("WARNING:", stderr),
-                errors = linesWith("ERROR:", stderr),
-                exitError = stderr.lastMeaningfulLine() ?: "yt-dlp hata verdi",
-            )
+            else -> second.withBotCheckMessage(context)
         }
     }
+
+    private fun downloadOnce(
+        context: Context,
+        taskId: String,
+        spec: DownloadSpec,
+        prefs: Prefs,
+        outDir: File,
+        forceIpv4: Boolean,
+        onProgress: (progress: Float, etaSeconds: Long, line: String) -> Unit,
+    ): DownloadResult {
+        val cookies = YoutubeAccount.cookieFileFor(context, taskId)
+        try {
+            val request = buildRequest(spec, prefs, outDir).apply {
+                addSessionOptions(context, cookies, forceIpv4)
+            }
+            return try {
+                val response = YoutubeDL.getInstance().execute(request, taskId, false) { progress, eta, line ->
+                    onProgress(progress, eta, line)
+                }
+                DownloadResult(linesWith("WARNING:", response.err))
+            } catch (failure: YoutubeDLException) {
+                // With --ignore-errors, a failed post-processing step (cover art, say)
+                // or a single unavailable playlist item still makes yt-dlp exit with 1.
+                // Whether that sinks the whole task is decided by the caller, based on
+                // whether any finished media file came out of it.
+                val stderr = failure.message.orEmpty()
+                DownloadResult(
+                    warnings = linesWith("WARNING:", stderr),
+                    errors = linesWith("ERROR:", stderr),
+                    exitError = stderr.lastMeaningfulLine() ?: "yt-dlp hata verdi",
+                )
+            }
+        } finally {
+            cookies?.delete()
+        }
+    }
+
+    private fun DownloadResult.withBotCheckMessage(context: Context) =
+        DownloadResult(warnings, errors, botCheckMessage(context))
 
     fun cancel(taskId: String): Boolean =
         runCatching { YoutubeDL.getInstance().destroyProcessById(taskId) }.getOrDefault(false)

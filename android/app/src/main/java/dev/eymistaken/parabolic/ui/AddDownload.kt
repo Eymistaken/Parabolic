@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.ContentPaste
@@ -81,6 +82,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import dev.eymistaken.parabolic.core.AudioFormat
 import dev.eymistaken.parabolic.core.DownloadSpec
@@ -89,6 +91,7 @@ import dev.eymistaken.parabolic.core.MediaProbe
 import dev.eymistaken.parabolic.core.Prefs
 import dev.eymistaken.parabolic.core.VideoContainer
 import dev.eymistaken.parabolic.core.VideoQuality
+import dev.eymistaken.parabolic.core.YoutubeAccount
 import dev.eymistaken.parabolic.core.YtdlpEngine
 import dev.eymistaken.parabolic.core.lastMeaningfulLine
 import dev.eymistaken.parabolic.ui.components.ConnectedChoiceRow
@@ -101,6 +104,7 @@ import dev.eymistaken.parabolic.ui.components.Pill
 import dev.eymistaken.parabolic.ui.components.SectionLabel
 import dev.eymistaken.parabolic.ui.components.SwitchRow
 import dev.eymistaken.parabolic.ui.components.ToggleFlow
+import dev.eymistaken.parabolic.ui.components.YoutubeSignInDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -114,6 +118,9 @@ class AddDownloadState(initialUrl: String, private val prefs: Prefs) {
     var probe by mutableStateOf<MediaProbe?>(null)
         private set
     var error by mutableStateOf<String?>(null)
+    /** The error is YouTube's "confirm you're not a bot"; signing in usually gets past it. */
+    var botCheck by mutableStateOf(false)
+        private set
 
     var kind by mutableStateOf(prefs.defaultKind)
     var quality by mutableStateOf(prefs.defaultQuality)
@@ -149,6 +156,7 @@ class AddDownloadState(initialUrl: String, private val prefs: Prefs) {
         url = target
         probing = true
         error = null
+        botCheck = false
         probe = null
         playlistTitle = null
         playlistCount = 0
@@ -185,7 +193,10 @@ class AddDownloadState(initialUrl: String, private val prefs: Prefs) {
                         }
                     }
                 }
-                .onFailure { error = it.message?.lastMeaningfulLine() ?: "Bilgi alınamadı" }
+                .onFailure {
+                    botCheck = it is YtdlpEngine.BotCheckFailure
+                    error = it.message?.lastMeaningfulLine() ?: "Bilgi alınamadı"
+                }
             probing = false
         }
     }
@@ -260,6 +271,8 @@ fun AddDownloadForm(
     var showExtras by remember { mutableStateOf(false) }
     var showLanguages by remember { mutableStateOf(false) }
     var presetMenu by remember { mutableStateOf(false) }
+    var showSignIn by remember { mutableStateOf(false) }
+    val youtubeSignedIn by YoutubeAccount.signedIn.collectAsStateWithLifecycle()
     val pickFolder = rememberFolderPicker { state.targetFolder = it }
 
     Column(
@@ -351,12 +364,39 @@ fun AddDownloadForm(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Icon(Icons.Filled.ErrorOutline, null, tint = MaterialTheme.colorScheme.onErrorContainer)
-                Text(
-                    state.error.orEmpty(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        state.error.orEmpty(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    if (state.botCheck && !youtubeSignedIn) {
+                        Button(
+                            onClick = { showSignIn = true },
+                            shapes = ButtonDefaults.shapes(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.onErrorContainer,
+                                contentColor = MaterialTheme.colorScheme.errorContainer,
+                            ),
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Login, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("YouTube'a giriş yap")
+                        }
+                    }
+                }
             }
+        }
+
+        if (showSignIn) {
+            YoutubeSignInDialog(
+                onDismiss = { showSignIn = false },
+                onSignedIn = {
+                    showSignIn = false
+                    // Try the same link again, now with the account's cookies.
+                    state.startProbe(context, scope)
+                },
+            )
         }
 
         // -- result ----------------------------------------------------------
