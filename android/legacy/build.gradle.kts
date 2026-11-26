@@ -32,8 +32,8 @@ android {
         applicationId = "dev.eymistaken.parabolic.legacy"
         minSdk = 24
         targetSdk = 36
-        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
-        versionName = (project.findProperty("versionName") as String?) ?: "1.0"
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1001000
+        versionName = (project.findProperty("versionName") as String?) ?: "1.1.0"
     }
 
     sourceSets {
