@@ -75,6 +75,11 @@ jobs:
     needs: [meta, android, ios]
     runs-on: ubuntu-latest
     steps:
+      # Only for the hand-written notes of this version, if there are any.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/release-notes
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -85,7 +90,13 @@ jobs:
           VERSION="${{ needs.meta.outputs.version }}"
           YTDLP=$(cat dist/ytdlp-version.txt 2>/dev/null || echo "unknown")
           rm -f dist/ytdlp-version.txt
-          cat > notes.md <<EOF
+          # .github/release-notes/v<version>.md, when present, opens the notes.
+          : > notes.md
+          if [ -f ".github/release-notes/v${VERSION}.md" ]; then
+            cat ".github/release-notes/v${VERSION}.md" >> notes.md
+            printf '\n---\n\n' >> notes.md
+          fi
+          cat >> notes.md <<EOF
           ## Downloads
 
           **Android 12 and later**: install the APK for your device's architecture. Almost every current phone uses \`arm64-v8a\`.
