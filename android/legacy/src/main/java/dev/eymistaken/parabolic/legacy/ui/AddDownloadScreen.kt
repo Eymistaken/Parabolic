@@ -101,9 +101,9 @@ class AddDownloadState(initialUrl: String, private val prefs: Prefs) {
     var probe by mutableStateOf<MediaProbe?>(null)
         private set
     var error by mutableStateOf<String?>(null)
+        private set
     /** The error is YouTube's "confirm you're not a bot"; signing in usually gets past it. */
     var botCheck by mutableStateOf(false)
-        private set
         private set
 
     var kind by mutableStateOf(prefs.defaultKind)

@@ -10,6 +10,10 @@ on:
       version:
         description: "Version to release, without the leading v (e.g. 1.2.0)"
         required: true
+      allow-debug-signing:
+        description: "No release keystore in secrets: sign with a throwaway CI key instead of failing (the APKs will not install over earlier releases)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -60,7 +64,8 @@ jobs:
     with:
       version: ${{ needs.meta.outputs.version }}
       build-number: ${{ needs.meta.outputs.build-number }}
-      release: true
+      # A tag always requires the release key; only a manual run may opt out.
+      release: ${{ !inputs.allow-debug-signing }}
     secrets: inherit
 
   ios:
@@ -92,6 +97,13 @@ jobs:
           rm -f dist/ytdlp-version.txt
           # .github/release-notes/v<version>.md, when present, opens the notes.
           : > notes.md
+          if [ "${{ needs.android.outputs.release-signed }}" != "true" ]; then
+            cat >> notes.md <<'WARN'
+          > [!WARNING]
+          > The Android APKs of this release are signed with a temporary key, not the key of earlier releases. Android refuses to install them over an installed Parabolic, so uninstall it first; its settings and download history are removed with it. Later releases will only install over this one once a permanent release key is set up.
+
+          WARN
+          fi
           if [ -f ".github/release-notes/v${VERSION}.md" ]; then
             cat ".github/release-notes/v${VERSION}.md" >> notes.md
             printf '\n---\n\n' >> notes.md
