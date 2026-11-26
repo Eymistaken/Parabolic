@@ -39,7 +39,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -216,13 +215,8 @@ private fun ActiveSection(task: DownloadTask) {
             }
         }
         Spacer(Modifier.height(8.dp))
-        if (progress != null) {
-            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-        } else if (queued) {
-            LinearProgressIndicator(progress = { 0f }, modifier = Modifier.fillMaxWidth())
-        } else {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        }
+        // A queued task has not started: an empty bar, not a busy one.
+        TaskProgressBar(progress ?: if (queued) 0f else null)
         val meta = listOfNotNull(task.speed, formatEta(task.etaSeconds))
         if (meta.isNotEmpty()) {
             Text(

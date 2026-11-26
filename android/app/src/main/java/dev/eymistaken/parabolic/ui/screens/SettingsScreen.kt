@@ -1,8 +1,11 @@
 package dev.eymistaken.parabolic.ui.screens
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,7 +14,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
@@ -46,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.eymistaken.parabolic.core.AudioFormat
 import dev.eymistaken.parabolic.core.MediaKind
 import dev.eymistaken.parabolic.core.Prefs
@@ -54,18 +60,25 @@ import dev.eymistaken.parabolic.core.UpdateChannelOption
 import dev.eymistaken.parabolic.core.VideoContainer
 import dev.eymistaken.parabolic.core.VideoQuality
 import dev.eymistaken.parabolic.core.YtdlpEngine
+import dev.eymistaken.parabolic.core.YtdlpUpdateProgress
+import dev.eymistaken.parabolic.ui.components.DownloadProgressBar
 import dev.eymistaken.parabolic.ui.components.ConnectedChoiceRow
 import dev.eymistaken.parabolic.ui.components.FolderRow
 import dev.eymistaken.parabolic.ui.components.rememberFolderPicker
 import dev.eymistaken.parabolic.ui.components.LanguagePickerSheet
 import dev.eymistaken.parabolic.ui.components.LanguageSummaryRow
 import dev.eymistaken.parabolic.ui.components.ParabolicLogo
+import dev.eymistaken.parabolic.ui.components.Pill
+import dev.eymistaken.parabolic.ui.components.ProgressPercent
 import dev.eymistaken.parabolic.ui.components.SectionCard
 import dev.eymistaken.parabolic.ui.components.SectionLabel
 import dev.eymistaken.parabolic.ui.components.SliderSetting
 import dev.eymistaken.parabolic.ui.components.SwitchRow
 import dev.eymistaken.parabolic.ui.components.ToggleFlow
+import dev.eymistaken.parabolic.ui.components.rememberShownUpdate
+import dev.eymistaken.parabolic.ui.formatBytes
 import dev.eymistaken.parabolic.ui.theme.dynamicColorSupported
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
@@ -77,11 +90,15 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var updating by remember { mutableStateOf(false) }
+    val update by YtdlpEngine.updateProgress.collectAsStateWithLifecycle()
+    val shownUpdate = rememberShownUpdate(update)
+    var requested by remember { mutableStateOf(false) }
+    val updating = requested || update != null
     var ytdlpVersion by remember { mutableStateOf<String?>(null) }
     var showLanguages by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) { ytdlpVersion = YtdlpEngine.ytdlpVersion(context) }
+    // Read again whenever an update (manual or the daily one) finishes.
+    LaunchedEffect(update == null) { ytdlpVersion = YtdlpEngine.ytdlpVersion(context) }
     val pickVideoFolder = rememberFolderPicker { prefs.videoFolder = it }
     val pickAudioFolder = rememberFolderPicker { prefs.audioFolder = it }
 
@@ -241,13 +258,29 @@ fun SettingsScreen(
                     checked = prefs.autoUpdateOnLaunch,
                     onCheckedChange = { prefs.autoUpdateOnLaunch = it },
                 )
+                // Also shows the daily automatic update when it happens to run now.
+                AnimatedVisibility(
+                    visible = shownUpdate.visible,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically(),
+                ) {
+                    shownUpdate.progress?.let { UpdateProgressSection(it) }
+                }
                 Button(
                     onClick = {
-                        updating = true
+                        requested = true
                         scope.launch {
-                            val result = runCatching { YtdlpEngine.updateYtdlp(context, prefs.updateChannel) }
+                            val result = try {
+                                Result.success(YtdlpEngine.updateYtdlp(context, prefs.updateChannel))
+                            } catch (cancelled: CancellationException) {
+                                // The screen went away; the update itself carries on.
+                                throw cancelled
+                            } catch (failure: Exception) {
+                                Result.failure(failure)
+                            } finally {
+                                requested = false
+                            }
                             ytdlpVersion = YtdlpEngine.ytdlpVersion(context)
-                            updating = false
                             onMessage(result.getOrElse { "Güncelleme başarısız: ${it.message ?: "bilinmeyen hata"}" })
                         }
                     },
@@ -255,11 +288,7 @@ fun SettingsScreen(
                     shapes = ButtonDefaults.shapes(),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                 ) {
-                    if (updating) {
-                        LoadingIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-                    } else {
-                        Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
-                    }
+                    Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(if (updating) "Güncelleniyor" else "Şimdi güncelle")
                 }
@@ -302,3 +331,41 @@ fun SettingsScreen(
     }
 }
 
+
+/** Stage, percentage, bar and byte count of a yt-dlp update, laid out like a download card's. */
+@Composable
+private fun UpdateProgressSection(update: YtdlpUpdateProgress) {
+    val fraction = update.fraction
+    Column(modifier = Modifier.padding(top = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Pill(
+                text = update.stage.label,
+                leading = if (fraction == null) {
+                    { LoadingIndicator(modifier = Modifier.size(18.dp), color = MaterialTheme.colorScheme.onSecondaryContainer) }
+                } else {
+                    null
+                },
+            )
+            Spacer(Modifier.weight(1f))
+            if (fraction != null) ProgressPercent(fraction)
+        }
+        Spacer(Modifier.height(10.dp))
+        DownloadProgressBar(fraction)
+        val meta = listOfNotNull(
+            update.version,
+            when {
+                update.totalBytes > 0 -> "${formatBytes(update.downloadedBytes)} / ${formatBytes(update.totalBytes)}"
+                update.downloadedBytes > 0 -> formatBytes(update.downloadedBytes)
+                else -> null
+            },
+        )
+        AnimatedVisibility(visible = meta.isNotEmpty()) {
+            Text(
+                text = meta.joinToString("  ·  "),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+    }
+}

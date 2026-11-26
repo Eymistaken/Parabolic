@@ -8,6 +8,7 @@ import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import com.yausername.aria2c.Aria2c
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -52,23 +53,12 @@ object YtdlpEngine {
         YoutubeDL.getInstance().version(context)
     }.getOrNull()
 
+    /** Progress of the running yt-dlp update, or null when none is running. */
+    val updateProgress: StateFlow<YtdlpUpdateProgress?> get() = YtdlpUpdater.progress
+
+    /** Updates yt-dlp from GitHub and returns a message for the user; see [YtdlpUpdater]. */
     suspend fun updateYtdlp(context: Context, channel: UpdateChannelOption): String =
-        withContext(Dispatchers.IO) {
-            ensureInit(context)
-            val target = when (channel) {
-                UpdateChannelOption.STABLE -> YoutubeDL.UpdateChannel.STABLE
-                UpdateChannelOption.NIGHTLY -> YoutubeDL.UpdateChannel.NIGHTLY
-                UpdateChannelOption.MASTER -> YoutubeDL.UpdateChannel.MASTER
-            }
-            val status = YoutubeDL.getInstance().updateYoutubeDL(context, target)
-            when (status) {
-                YoutubeDL.UpdateStatus.DONE ->
-                    "yt-dlp güncellendi: ${ytdlpVersion(context) ?: "?"}"
-                YoutubeDL.UpdateStatus.ALREADY_UP_TO_DATE ->
-                    "yt-dlp zaten güncel: ${ytdlpVersion(context) ?: "?"}"
-                else -> "Güncelleme durumu bilinmiyor"
-            }
-        }
+        YtdlpUpdater.update(context, channel)
 
     // -- probing -----------------------------------------------------------
 

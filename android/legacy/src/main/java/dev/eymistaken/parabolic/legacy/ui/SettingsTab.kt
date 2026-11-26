@@ -1,17 +1,23 @@
 package dev.eymistaken.parabolic.legacy.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.eymistaken.parabolic.BuildConfig
 import dev.eymistaken.parabolic.R
 import dev.eymistaken.parabolic.core.AudioFormat
@@ -40,6 +47,8 @@ import dev.eymistaken.parabolic.core.UpdateChannelOption
 import dev.eymistaken.parabolic.core.VideoContainer
 import dev.eymistaken.parabolic.core.VideoQuality
 import dev.eymistaken.parabolic.core.YtdlpEngine
+import dev.eymistaken.parabolic.core.YtdlpUpdateProgress
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -55,9 +64,13 @@ fun SettingsTab(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var picker by remember { mutableStateOf<Picker?>(null) }
-    var updating by remember { mutableStateOf(false) }
+    val update by YtdlpEngine.updateProgress.collectAsStateWithLifecycle()
+    val shownUpdate = rememberShownUpdate(update)
+    var requested by remember { mutableStateOf(false) }
+    val updating = requested || update != null
     var ytdlpVersion by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) { ytdlpVersion = YtdlpEngine.ytdlpVersion(context) }
+    // Read again whenever an update (manual or the daily one) finishes.
+    LaunchedEffect(update == null) { ytdlpVersion = YtdlpEngine.ytdlpVersion(context) }
     val pickVideoFolder = rememberFolderPicker { prefs.videoFolder = it }
     val pickAudioFolder = rememberFolderPicker { prefs.audioFolder = it }
 
@@ -131,24 +144,36 @@ fun SettingsTab(
         item {
             ListItem(
                 modifier = Modifier.clickable(enabled = !updating) {
-                    updating = true
+                    requested = true
                     scope.launch {
-                        val result = runCatching { YtdlpEngine.updateYtdlp(context, prefs.updateChannel) }
+                        val result = try {
+                            Result.success(YtdlpEngine.updateYtdlp(context, prefs.updateChannel))
+                        } catch (cancelled: CancellationException) {
+                            // The screen went away; the update itself carries on.
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            Result.failure(failure)
+                        } finally {
+                            requested = false
+                        }
                         ytdlpVersion = YtdlpEngine.ytdlpVersion(context)
-                        updating = false
                         onMessage(result.getOrElse { "Güncelleme başarısız: ${it.message ?: "bilinmeyen hata"}" })
                     }
                 },
                 headlineContent = { Text(if (updating) "Güncelleniyor…" else "Şimdi güncelle") },
                 supportingContent = { Text("Yüklü sürüm: ${ytdlpVersion ?: "gömülü"}") },
-                trailingContent = {
-                    if (updating) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Filled.Refresh, contentDescription = null)
-                    }
-                },
+                trailingContent = { Icon(Icons.Filled.Refresh, contentDescription = null) },
             )
+        }
+        // Also shows the daily automatic update when it happens to run now.
+        item {
+            AnimatedVisibility(
+                visible = shownUpdate.visible,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically(),
+            ) {
+                shownUpdate.progress?.let { UpdateProgressRow(it) }
+            }
         }
         item { ValueItem("Güncelleme kanalı", prefs.updateChannel.label, onClick = { picker = Picker.Channel }) }
         item {
@@ -231,5 +256,45 @@ private fun SliderItem(title: String, value: Int, range: IntRange, onChange: (In
             valueRange = range.first.toFloat()..range.last.toFloat(),
             steps = (range.last - range.first - 1).coerceAtLeast(0),
         )
+    }
+}
+
+/** Stage, percentage, bar and byte count of a yt-dlp update, laid out like a download row's. */
+@Composable
+private fun UpdateProgressRow(update: YtdlpUpdateProgress) {
+    val fraction = update.fraction
+    Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = update.stage.label,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            if (fraction != null) {
+                Text(
+                    text = "%${(fraction * 100).toInt()}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        TaskProgressBar(fraction)
+        val meta = listOfNotNull(
+            update.version,
+            when {
+                update.totalBytes > 0 -> "${formatBytes(update.downloadedBytes)} / ${formatBytes(update.totalBytes)}"
+                update.downloadedBytes > 0 -> formatBytes(update.downloadedBytes)
+                else -> null
+            },
+        )
+        if (meta.isNotEmpty()) {
+            Text(
+                text = meta.joinToString("  ·  "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
     }
 }

@@ -50,7 +50,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
@@ -67,10 +66,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,9 +75,10 @@ import coil.compose.AsyncImage
 import dev.eymistaken.parabolic.core.DownloadState
 import dev.eymistaken.parabolic.core.DownloadTask
 import dev.eymistaken.parabolic.core.MediaKind
-import dev.eymistaken.parabolic.ui.components.CalmIndeterminateBar
+import dev.eymistaken.parabolic.ui.components.DownloadProgressBar
 import dev.eymistaken.parabolic.ui.components.ParabolicLogo
 import dev.eymistaken.parabolic.ui.components.Pill
+import dev.eymistaken.parabolic.ui.components.ProgressPercent
 import dev.eymistaken.parabolic.ui.components.toShapeSafe
 import dev.eymistaken.parabolic.ui.formatEta
 
@@ -305,8 +302,6 @@ private fun Thumbnail(task: DownloadTask, done: Boolean) {
 
 @Composable
 private fun ActiveSection(task: DownloadTask) {
-    val density = LocalDensity.current
-    val thick = with(density) { Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round) }
     val queued = task.state == DownloadState.QUEUED
     val progress = task.progress
     Column(modifier = Modifier.padding(top = 14.dp)) {
@@ -324,36 +319,10 @@ private fun ActiveSection(task: DownloadTask) {
                 },
             )
             Spacer(Modifier.weight(1f))
-            if (progress != null) {
-                val animated by animateFloatAsState(progress, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "pct")
-                Text(
-                    text = "${(animated * 100).toInt()}%",
-                    style = MaterialTheme.typography.headlineMediumEmphasized,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
+            if (progress != null) ProgressPercent(progress)
         }
         Spacer(Modifier.height(10.dp))
-        if (progress != null) {
-            val animated by animateFloatAsState(
-                targetValue = progress,
-                animationSpec = MaterialTheme.motionScheme.slowSpatialSpec(),
-                label = "bar",
-            )
-            // Long, slow waves: the filled part leans gently instead of wriggling.
-            LinearWavyProgressIndicator(
-                progress = { animated },
-                modifier = Modifier.fillMaxWidth().height(18.dp),
-                stroke = thick,
-                trackStroke = thick,
-                wavelength = 48.dp,
-                waveSpeed = 14.dp,
-            )
-        } else {
-            Box(modifier = Modifier.fillMaxWidth().height(18.dp), contentAlignment = Alignment.Center) {
-                CalmIndeterminateBar(trackHeight = 8.dp)
-            }
-        }
+        DownloadProgressBar(progress)
         val meta = listOfNotNull(task.speed, formatEta(task.etaSeconds))
         AnimatedVisibility(visible = meta.isNotEmpty()) {
             Text(
