@@ -100,7 +100,9 @@ object YtdlpEngine {
                 addSessionOptions(context, cookies, forceIpv4)
             }
             val response = try {
-                YoutubeDL.getInstance().execute(request, null, null)
+                YtdlpUpdater.holdingBinary(context) {
+                    YoutubeDL.getInstance().execute(request, null, null)
+                }
             } catch (failure: YoutubeDLException) {
                 throw ProbeFailure(failure.message?.lastMeaningfulLine() ?: "yt-dlp hata verdi")
             }
@@ -302,8 +304,10 @@ object YtdlpEngine {
                 addSessionOptions(context, cookies, forceIpv4)
             }
             return try {
-                val response = YoutubeDL.getInstance().execute(request, taskId, false) { progress, eta, line ->
-                    onProgress(progress, eta, line)
+                val response = YtdlpUpdater.holdingBinary(context) {
+                    YoutubeDL.getInstance().execute(request, taskId, false) { progress, eta, line ->
+                        onProgress(progress, eta, line)
+                    }
                 }
                 DownloadResult(linesWith("WARNING:", response.err))
             } catch (failure: YoutubeDLException) {

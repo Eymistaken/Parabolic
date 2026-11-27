@@ -53,9 +53,21 @@ data class YtdlpUpdateProgress(
  * preference keys, so [YoutubeDL.version] keeps reporting what is installed and
  * the library's updater would see the same state.
  *
- * The download lands next to the installed binary and replaces it with a
- * rename only once it is complete (and its SHA-256 matches, when GitHub lists
- * one), so a failed or interrupted update leaves the working version in place.
+ * The download lands next to the installed binary and is used only once it is
+ * complete (and its SHA-256 matches, when GitHub lists one), so a failed or
+ * interrupted update leaves the working version in place.
+ *
+ * It also never replaces the binary while a yt-dlp is running; see
+ * [holdingBinary]. Python's zipimport reads the zipapp's table of contents
+ * once, when the process starts, and reopens the file by path for every module
+ * it loads later. yt-dlp loads most of its code that way, in the middle of a
+ * run: the extractor for a link only when the link is looked up. A new zipapp
+ * renamed over the old one in between makes those reads land at the old
+ * offsets in the new file, and yt-dlp dies with "zipimport.ZipImportError: bad
+ * local file header". The daily update starts with the app, so a link looked
+ * up right after opening it ran into exactly that. A finished download is
+ * therefore staged next to the binary and moved into place only while no
+ * yt-dlp is running: at once if none is, otherwise when the last one exits.
  *
  * Updates run in their own scope: leaving the settings screen does not abort
  * one, and the daily automatic update shows up in the UI like a manual one.
@@ -68,6 +80,11 @@ object YtdlpUpdater {
     private const val LIBRARY_PREFS = "youtubedl-android"
     private const val KEY_VERSION = "dlpVersion"
     private const val KEY_VERSION_NAME = "dlpVersionName"
+
+    // The staged build waiting for yt-dlp to go idle; survives a restart.
+    private const val STAGING_PREFS = "ytdlp-staged"
+    private const val KEY_STAGED_VERSION = "version"
+    private const val KEY_STAGED_VERSION_NAME = "versionName"
 
     private const val CONNECT_TIMEOUT_MS = 15_000
     private const val READ_TIMEOUT_MS = 30_000
@@ -113,36 +130,128 @@ object YtdlpUpdater {
             val binary = installedBinary(context)
             val dir = binary.parentFile ?: throw IOException("yt-dlp dizini bulunamadı")
             dir.mkdirs()
-            val partial = File(dir, "${binary.name}.download")
-            try {
-                download(release, partial)
-
-                _progress.value = YtdlpUpdateProgress(
-                    stage = YtdlpUpdateProgress.Stage.INSTALLING,
-                    fraction = 1f,
-                    downloadedBytes = partial.length(),
-                    totalBytes = partial.length(),
-                    version = release.tag,
-                )
-                // rename(2) swaps the file in one step; a yt-dlp that is already
-                // running keeps the copy it opened.
-                if (!partial.renameTo(binary)) {
-                    partial.copyTo(binary, overwrite = true)
+            val staged = stagedBinary(context)
+            val alreadyStaged = synchronized(gate) {
+                staged.isFile && stagingPrefs(context).getString(KEY_STAGED_VERSION, null) == release.tag
+            }
+            if (!alreadyStaged) {
+                val partial = File(dir, "${binary.name}.download")
+                try {
+                    download(release, partial)
+                    synchronized(gate) {
+                        // Replaces an older build that is still waiting, if any.
+                        if (!partial.renameTo(staged)) {
+                            partial.copyTo(staged, overwrite = true)
+                        }
+                        stagingPrefs(context).edit()
+                            .putString(KEY_STAGED_VERSION, release.tag)
+                            .putString(KEY_STAGED_VERSION_NAME, release.name)
+                            .commit()
+                    }
+                } finally {
+                    partial.delete()
                 }
-            } finally {
-                partial.delete()
             }
 
-            prefs.edit()
-                .putString(KEY_VERSION, release.tag)
-                .putString(KEY_VERSION_NAME, release.name)
-                .commit()
-            Log.i(TAG, "installed yt-dlp ${release.tag} (${channel.name})")
-            return "yt-dlp güncellendi: ${release.tag}"
+            _progress.value = YtdlpUpdateProgress(
+                stage = YtdlpUpdateProgress.Stage.INSTALLING,
+                fraction = 1f,
+                downloadedBytes = staged.length(),
+                totalBytes = staged.length(),
+                version = release.tag,
+            )
+            // A yt-dlp that started in the meantime may have put it in place already.
+            val stillRunning = synchronized(gate) {
+                if (running == 0) installStaged(context)
+                running
+            }
+            return if (prefs.getString(KEY_VERSION, null) == release.tag) {
+                Log.i(TAG, "installed yt-dlp ${release.tag} (${channel.name})")
+                "yt-dlp güncellendi: ${release.tag}"
+            } else {
+                Log.i(TAG, "staged yt-dlp ${release.tag} (${channel.name}); $stillRunning run(s) still going")
+                "yt-dlp ${release.tag} indirildi; süren işlemler bitince kendiliğinden kurulacak"
+            }
         } finally {
             _progress.value = null
         }
     }
+
+    // -- keeping the binary in place while yt-dlp runs ------------------------
+
+    /** Guards [running] and every move of the staged build into place. */
+    private val gate = Any()
+
+    /** yt-dlp processes started through [holdingBinary] that have not exited yet. */
+    private var running = 0
+
+    /**
+     * Runs [block], which must start yt-dlp and wait for it to exit, while
+     * keeping the installed zipapp in place. A build staged by an update is
+     * installed just before, if no other yt-dlp is running, or right after the
+     * last one exits.
+     */
+    fun <T> holdingBinary(context: Context, block: () -> T): T {
+        val app = context.applicationContext
+        synchronized(gate) {
+            if (running == 0) installStagedQuietly(app)
+            running++
+        }
+        try {
+            return block()
+        } finally {
+            synchronized(gate) {
+                running--
+                if (running == 0) installStagedQuietly(app)
+            }
+        }
+    }
+
+    private fun installStagedQuietly(context: Context) {
+        try {
+            installStaged(context)
+        } catch (failure: Exception) {
+            // The installed build still works; the next update downloads again.
+            Log.w(TAG, "could not install the staged yt-dlp", failure)
+            discardStaged(context)
+        }
+    }
+
+    /**
+     * Moves the staged build over the installed one and records its version.
+     * Must be called holding [gate] with nothing running. Returns false when
+     * there is nothing (complete) to install.
+     */
+    private fun installStaged(context: Context): Boolean {
+        val staged = stagedBinary(context)
+        val stagingPrefs = stagingPrefs(context)
+        val version = stagingPrefs.getString(KEY_STAGED_VERSION, null)
+        if (!staged.isFile || version == null) {
+            // Half of a staging that the process did not live to finish.
+            if (staged.exists() || version != null) discardStaged(context)
+            return false
+        }
+        val binary = installedBinary(context)
+        if (!staged.renameTo(binary)) {
+            staged.copyTo(binary, overwrite = true)
+            staged.delete()
+        }
+        context.getSharedPreferences(LIBRARY_PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_VERSION, version)
+            .putString(KEY_VERSION_NAME, stagingPrefs.getString(KEY_STAGED_VERSION_NAME, null) ?: version)
+            .commit()
+        stagingPrefs.edit().clear().commit()
+        Log.i(TAG, "yt-dlp $version is now in place")
+        return true
+    }
+
+    private fun discardStaged(context: Context) {
+        stagedBinary(context).delete()
+        stagingPrefs(context).edit().clear().commit()
+    }
+
+    private fun stagingPrefs(context: Context) =
+        context.getSharedPreferences(STAGING_PREFS, Context.MODE_PRIVATE)
 
     private class Release(
         val tag: String,
@@ -239,6 +348,10 @@ object YtdlpUpdater {
     /** The zipapp youtubedl-android runs: noBackupFilesDir/youtubedl-android/yt-dlp/yt-dlp. */
     private fun installedBinary(context: Context): File =
         File(File(File(context.noBackupFilesDir, YoutubeDL.baseName), YoutubeDL.ytdlpDirName), YoutubeDL.ytdlpBin)
+
+    /** A verified new build next to [installedBinary], waiting for yt-dlp to go idle. */
+    private fun stagedBinary(context: Context): File =
+        installedBinary(context).let { File(it.parentFile, "${it.name}.staged") }
 
     private fun open(url: String): HttpURLConnection =
         (URL(url).openConnection() as HttpURLConnection).apply {

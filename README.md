@@ -52,7 +52,11 @@ Jetpack Compose ve Material 3 Expressive ile yazıldı; renkleri Material You
 - `youtubedl-android` paketindeki **QuickJS** yt-dlp'ye `--js-runtimes quickjs:`
   olarak geçiliyor; YouTube'un JavaScript challenge'ları böyle çözülüyor.
 - yt-dlp, GitHub release'lerinden **çalışma zamanında güncelleniyor**; ayarlarda
-  güncellemenin ilerlemesi indirme kartlarındaki çubukla gösteriliyor.
+  güncellemenin ilerlemesi indirme kartlarındaki çubukla gösteriliyor. İnen sürüm
+  yalnızca çalışan bir yt-dlp yokken yerine konur: Python zipapp'in içindekiler
+  listesini başlarken bir kez okuyup modülleri sonradan dosya adıyla açtığı için,
+  çalışırken değiştirilen dosya `zipimport.ZipImportError: bad local file header`
+  hatası verir. Süren bir arama ya da indirme varsa yeni sürüm o bitince kurulur.
 - İndirme uygulamanın özel dizinine yapılır, sonra MediaStore'a kopyalanır.
   Android 10 ve üstünde hiçbir depolama izni gerekmez.
 
