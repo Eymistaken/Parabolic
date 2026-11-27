@@ -20,8 +20,8 @@ android {
         minSdk = 24
         targetSdk = 36
         // CI passes these from the release tag (-PversionName=1.2.0 -PversionCode=42).
-        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1001000
-        versionName = (project.findProperty("versionName") as String?) ?: "1.1.0"
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1001001
+        versionName = (project.findProperty("versionName") as String?) ?: "1.1.1"
     }
 
     // One APK per ABI: the python/ffmpeg payloads are ~55 MB per architecture,
