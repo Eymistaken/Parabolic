@@ -48,6 +48,24 @@ class DownloadRepository(
 
     val activeCount: Int get() = _tasks.value.count { it.state.isActive }
 
+    init {
+        // Tasks live only in memory, so a work folder from an earlier process
+        // (a failed task kept for its retry, or a run the system killed) has
+        // nobody left to resume it.
+        val leftovers = File(context.filesDir, WORK_ROOT).listFiles().orEmpty().toList()
+        if (leftovers.isNotEmpty()) {
+            scope.launch { leftovers.forEach { runCatching { it.deleteRecursively() } } }
+        }
+    }
+
+    private fun workDir(id: String) = File(context.filesDir, "$WORK_ROOT/$id")
+
+    /** Drops the partial files a failed task kept for "Tekrar dene". */
+    private fun discardWork(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        scope.launch { ids.forEach { runCatching { workDir(it).deleteRecursively() } } }
+    }
+
     fun showMessage(message: String) {
         _toast.value = message
     }
@@ -89,9 +107,14 @@ class DownloadRepository(
     fun cancel(id: String) {
         cancelRequested += id
         // Killing yt-dlp lets the task wind down on its own, which is what keeps
-        // already-finished playlist items. Only a task with no process yet (still
-        // queued or initializing) has its coroutine cancelled outright.
-        if (!YtdlpEngine.cancel(id)) jobs.remove(id)?.cancel()
+        // already-finished playlist items. A task with no process yet (still
+        // initializing) has its coroutine cancelled outright; one still waiting
+        // in the queue has no run at all, so the partial files a failed attempt
+        // left for it are dropped here.
+        if (!YtdlpEngine.cancel(id)) {
+            val job = jobs.remove(id)
+            if (job != null) job.cancel() else discardWork(listOf(id))
+        }
         update(id) {
             if (it.state.isTerminal) it else it.copy(state = DownloadState.CANCELED, speed = null, progress = null)
         }
@@ -99,15 +122,21 @@ class DownloadRepository(
     }
 
     fun dismiss(id: String) {
-        if (_tasks.value.firstOrNull { it.id == id }?.state?.isActive == true) {
-            cancel(id)
+        val task = _tasks.value.firstOrNull { it.id == id }
+        when {
+            task == null -> Unit
+            // The run removes its own folder once it has wound down.
+            task.state.isActive -> cancel(id)
+            else -> discardWork(listOf(id))
         }
         _tasks.value = _tasks.value.filterNot { it.id == id }
         syncService()
     }
 
     fun clearFinished() {
-        _tasks.value = _tasks.value.filter { it.state.isActive }
+        val (active, finished) = _tasks.value.partition { it.state.isActive }
+        _tasks.value = active
+        discardWork(finished.map { it.id })
         syncService()
     }
 
@@ -136,8 +165,10 @@ class DownloadRepository(
     // -- one download ------------------------------------------------------
 
     private fun launchTask(task: DownloadTask): Job = scope.launch {
-        val outDir = File(context.filesDir, "dl/${task.id}")
+        // The same folder on every attempt, so a retry resumes the .part files.
+        val outDir = workDir(task.id)
         val spec = task.spec
+        var failed = false
         update(task.id) { it.copy(state = DownloadState.RUNNING, stage = DownloadStage.PREPARING) }
         syncService()
 
@@ -279,6 +310,7 @@ class DownloadRepository(
             update(task.id) { it.copy(state = DownloadState.CANCELED, speed = null) }
             throw cancellation
         } catch (error: Throwable) {
+            failed = true
             Log.e("DownloadRepository", "download failed", error)
             val message = (error.message ?: error.toString()).lastMeaningfulLine()
                 ?: "Bilinmeyen hata"
@@ -298,7 +330,9 @@ class DownloadRepository(
             )
         } finally {
             cancelRequested -= task.id
-            runCatching { outDir.deleteRecursively() }
+            // A failed run leaves its partial files for "Tekrar dene" to go on
+            // from; dismissing the task or clearing the list removes them.
+            if (!failed) runCatching { outDir.deleteRecursively() }
             finish(task.id)
         }
     }
@@ -438,6 +472,9 @@ class DownloadRepository(
     }
 
 }
+
+/** Under filesDir: one work folder per task, named after its id. */
+private const val WORK_ROOT = "dl"
 
 private val SUBTITLE_LANG = Regex("""subtitles for '([^']+)'""")
 private val SKIPPED_SUBTITLE = Regex("""Skipping embedding ([A-Za-z-]+) subtitle""")

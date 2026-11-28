@@ -316,16 +316,41 @@ object YtdlpEngine {
                 // Whether that sinks the whole task is decided by the caller, based on
                 // whether any finished media file came out of it.
                 val stderr = failure.message.orEmpty()
+                val last = stderr.lastMeaningfulLine()
                 DownloadResult(
                     warnings = linesWith("WARNING:", stderr),
                     errors = linesWith("ERROR:", stderr),
-                    exitError = stderr.lastMeaningfulLine() ?: "yt-dlp hata verdi",
+                    exitError = when {
+                        last == null -> "yt-dlp hata verdi"
+                        isNetworkError(last) -> NETWORK_FAILURE_MESSAGE
+                        else -> last
+                    },
                 )
             }
         } finally {
             cookies?.delete()
         }
     }
+
+    /**
+     * yt-dlp's last line when the connection stayed gone through every retry:
+     * "Giving up after 10 retries", or the socket error of the last attempt
+     * (no DNS, no route, refused, reset, timed out).
+     */
+    private val NETWORK_ERROR = Regex(
+        "Giving up after|Failed to establish a new connection|Failed to resolve|" +
+            "No address associated with hostname|Temporary failure in name resolution|" +
+            "Name or service not known|Network is unreachable|Network is down|No route to host|" +
+            "Software caused connection abort|Connection reset|Connection aborted|Connection refused|" +
+            "Remote end closed connection|RemoteDisconnected|IncompleteRead|timed out",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private fun isNetworkError(text: String): Boolean = NETWORK_ERROR.containsMatchIn(text)
+
+    private const val NETWORK_FAILURE_MESSAGE =
+        "İnternet bağlantısı koptu ve yt-dlp'nin yeniden denemeleri boyunca geri gelmedi. " +
+            "Bağlantı gelince Tekrar dene'ye bas; indirme kaldığı yerden devam eder."
 
     private fun DownloadResult.withBotCheckMessage(context: Context) =
         DownloadResult(warnings, errors, botCheckMessage(context))
@@ -342,9 +367,22 @@ object YtdlpEngine {
             // a failed media download still exits non-zero and is reported.
             addOption("--ignore-errors")
             addOption("--no-mtime")
+            // A failed task keeps its work folder, so "Tekrar dene" picks the
+            // .part files up again instead of starting over.
             addOption("--continue")
+            // yt-dlp retries a dropped connection 10 times, but by default with
+            // no wait in between: with the network gone (no DNS, no route) all
+            // ten fail within a second or two. Waiting 1, 2, 4, 8, 16 and then
+            // 30 s spreads them over about three minutes, so a Wi-Fi drop, a
+            // tunnel or a switch to mobile data is ridden out and the download
+            // goes on from the byte it had reached.
             addOption("--retries", "10")
             addOption("--fragment-retries", "10")
+            addOption("--retry-sleep", "http,fragment:exp=1:30")
+            // Looking the video up again at the start of the run: YouTube's
+            // requests are retried on network errors too, for about 30 s.
+            addOption("--extractor-retries", "5")
+            addOption("--retry-sleep", "extractor:exp=1:30")
             addOption("--socket-timeout", "30")
             addOption("--paths", outDir.absolutePath)
 
@@ -361,6 +399,9 @@ object YtdlpEngine {
             addOption("--concurrent-fragments", prefs.concurrentFragments.coerceIn(1, 16))
             if (prefs.useAria2c) {
                 addOption("--downloader", "libaria2c.so")
+                // yt-dlp does not hand --retries on to aria2c, which on its own
+                // gives up after 5 tries with no wait in between.
+                addOption("--downloader-args", "aria2c:--max-tries=10 --retry-wait=15")
             }
 
             when (spec.kind) {
